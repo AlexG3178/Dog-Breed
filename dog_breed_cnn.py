@@ -3,6 +3,7 @@ import torchvision
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.datasets import ImageFolder
+from torchvision import models
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as transforms
 from sklearn.model_selection import train_test_split
@@ -18,8 +19,9 @@ print('CUDA Available =', torch.cuda.is_available())
 print(torch.cuda.get_device_name(0))
 
 
-n_epochs = 10
+n_epochs = 50
 batch_size = 32
+num_workers = 0
 
 def rename(name):
     new_name = name.split('.')[1]
@@ -45,29 +47,42 @@ class DogsDataset(Dataset):
 
     def __getitem__(self, idx):
         img, label = self.ds[idx]
+
+        # Debugging: Check the type of the image before and after transformation
+        # print(f"Before transform: {type(img)}")
+
         if self.transform:
-            img = self.transform(img)
+            try:
+                img = self.transform(img)
+                # print(f"After transform: {type(img)}")
+            except Exception as e:
+                print(f"Error during transformation: {e}")
+                raise
+
         return img, label
         
         
 imagenet_stats = ([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
 train_transform = transforms.Compose([
-    transforms.Resize((256, 256)),
-    transforms.RandomCrop(224, padding=4, padding_mode='reflect'),
-    transforms.RandomHorizontalFlip(p=0.3),
-    transforms.RandomRotation(degrees=30),
-    transforms.ToTensor(),
+    transforms.Resize((256, 256)),  # Resize the image
+    transforms.RandomCrop(224, padding=4, padding_mode='reflect'),  # Random crop
+    transforms.RandomHorizontalFlip(p=0.3),  # Random horizontal flip
+    transforms.RandomRotation(degrees=30),  # Random rotation
+    transforms.ToTensor(),  # Convert image to PyTorch tensor
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize
 ])
 
 val_transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
+    transforms.Resize((224, 224)),  # Resize the image
+    transforms.ToTensor(),  # Convert image to PyTorch tensor
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize
 ])
 
 test_transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
+    transforms.Resize((224, 224)),  # Resize the image
+    transforms.ToTensor(),  # Convert image to PyTorch tensor
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize
 ])
 
 train_dataset = DogsDataset(train_ds, train_transform)
@@ -75,9 +90,9 @@ val_dataset = DogsDataset(val_ds, val_transform)
 test_dataset = DogsDataset(test_ds, test_transform)
         
 
-train_dl = DataLoader(train_dataset, batch_size, shuffle=True, num_workers=1, pin_memory=True)
-val_dl = DataLoader(val_dataset, batch_size*2, num_workers=1, pin_memory=True)
-test_dl = DataLoader(test_dataset, batch_size*2, num_workers=1, pin_memory=True)
+train_dl = DataLoader(train_dataset, batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
+val_dl = DataLoader(val_dataset, batch_size*2, num_workers=num_workers, pin_memory=True)
+test_dl = DataLoader(test_dataset, batch_size*2, num_workers=num_workers, pin_memory=True)
 
 
 def accuracy(outputs, labels):
@@ -108,51 +123,67 @@ class ImageClassificationBase(nn.Module):
     def epoch_end(self, epoch, result):
         print(f"Epoch [{epoch+1}], train_loss: {result['train_loss']:.4f}, val_loss: {result['val_loss']:.4f}, val_acc: {result['val_acc']:.4f}")
 
-class DogBreedClassificationCNN(ImageClassificationBase):
+# class DogBreedClassificationCNN(ImageClassificationBase):
+#     def __init__(self):
+#         super().__init__()
+#         self.network = nn.Sequential(
+#             nn.Conv2d(3, 32, kernel_size=3, padding=1),
+#             nn.BatchNorm2d(32),
+#             nn.ReLU(),
+#             nn.Conv2d(32, 64, kernel_size=3, padding=1),
+#             nn.BatchNorm2d(64),
+#             nn.ReLU(),
+#             nn.MaxPool2d(2, 2),
+
+#             nn.Conv2d(64, 128, kernel_size=3, padding=1),
+#             nn.BatchNorm2d(128),
+#             nn.ReLU(),
+#             nn.Conv2d(128, 256, kernel_size=3, padding=1),
+#             nn.BatchNorm2d(256),
+#             nn.ReLU(),
+#             nn.MaxPool2d(2, 2),
+
+#             nn.Conv2d(256, 512, kernel_size=3, padding=1),
+#             nn.BatchNorm2d(512),
+#             nn.ReLU(),
+#             nn.Conv2d(512, 512, kernel_size=3, padding=1),
+#             nn.BatchNorm2d(512),
+#             nn.ReLU(),
+#             nn.MaxPool2d(2, 2),
+
+#             nn.Conv2d(512, 512, kernel_size=3, padding=1),
+#             nn.BatchNorm2d(512),
+#             nn.ReLU(),
+#             nn.MaxPool2d(2, 2),
+
+#             nn.AdaptiveAvgPool2d(1),
+#             nn.Flatten(),
+#             nn.Dropout(0.5),
+#             nn.Linear(512, len(breeds)),
+#             nn.LogSoftmax(dim=1)
+#         )
+
+#     def forward(self, xb):
+#         return self.network(xb)
+
+# model = DogBreedClassificationCNN()
+
+class DogBreedClassificationPretrained(ImageClassificationBase):
     def __init__(self):
         super().__init__()
-        self.network = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=3, padding=1),
-            nn.BatchNorm2d(16),
-            nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-
-            nn.Conv2d(128, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(),
-            nn.Conv2d(256, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-
-            nn.Conv2d(256, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-
-            nn.Flatten(),
+        self.network = models.resnet50(weights='DEFAULT')
+        num_ftrs = self.network.fc.in_features
+        self.network.fc = nn.Sequential(
             nn.Dropout(0.5),
-            nn.Linear(14*14*256, 512),
-            nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(512, len(breeds)),
+            nn.Linear(num_ftrs, len(breeds)),
             nn.LogSoftmax(dim=1)
         )
+    
     def forward(self, xb):
         return self.network(xb)
 
-model = DogBreedClassificationCNN()
+# Model initialization
+model = DogBreedClassificationPretrained()
 
                                                 # TO GPU
 def get_default_device():
@@ -265,13 +296,13 @@ if __name__ == "__main__":
     print(f"Test Loss: {result['val_loss']:.4f}, Test Accuracy: {result['val_acc']:.4f}")
     
     # Prediction
-    # def predict_single(img, label):
-    #     xb = to_device(img.unsqueeze(0), device)
-    #     preds = model(xb)
-    #     _, pred = torch.max(preds, dim=1)
-    #     print(f'Actual: {breeds[label]}, Predicted: {breeds[pred.item()]}')
-    #     plt.imshow(img.permute(1, 2, 0))
-    #     plt.show()
+    def predict_single(img, label):
+        xb = to_device(img.unsqueeze(0), device)
+        preds = model(xb)
+        _, pred = torch.max(preds, dim=1)
+        print(f'Actual: {breeds[label]}, Predicted: {breeds[pred.item()]}')
+        plt.imshow(img.permute(1, 2, 0))
+        plt.show()
 
-    # # Test a prediction
-    # predict_single(*test_dataset[4])
+    # Test a prediction
+    predict_single(*test_dataset[4])
