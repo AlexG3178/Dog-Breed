@@ -20,14 +20,13 @@ print('CUDA Available =', torch.cuda.is_available())
 print(torch.cuda.get_device_name(0))
 
 
-n_epochs = 10
-max_leaning_rate = 0.01
-weight_decay = 1e-4
+n_epochs = 50
+max_leaning_rate = 0.001
+weight_decay = 1e-3
 gradient_clip = 0.1
-batch_size = 32
+batch_size = 32   # 64 !!!!!!!!!!!
 num_workers = 0
 patience = 3
-# optimizer = torch.optim.Adam
 optimizer = torch.optim.SGD
 momentum = 0.9
 
@@ -189,7 +188,7 @@ class DogBreedClassificationCNN(ImageClassificationBase):
 class DogBreedClassificationEfficientNet(ImageClassificationBase):
     def __init__(self):
         super().__init__()
-        self.network = models.efficientnet_b0(weights='DEFAULT')
+        self.network = models.efficientnet_b1 (weights='DEFAULT')
         
          # Freeze all layers except the classifier - works faster but less accurate
 #         for param in self.network.parameters():
@@ -298,7 +297,8 @@ def fit(epochs, model, train_loader, val_loader, max_lr=0.01, weight_dec=1e-4, m
     torch.cuda.empty_cache()
     history = []
     optim = opt(model.parameters(), max_lr, weight_decay=weight_dec, momentum=moment)
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(optim, max_lr, epochs=epochs, steps_per_epoch=len(train_loader))
+    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optim, max_lr, epochs=epochs, steps_per_epoch=len(train_loader))
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, mode='min', patience=patien, verbose=True)
 
     best_val_loss = float('inf')
     epochs_without_improvement = 0
@@ -317,8 +317,8 @@ def fit(epochs, model, train_loader, val_loader, max_lr=0.01, weight_dec=1e-4, m
 
             optim.step()
             optim.zero_grad()
-            scheduler.step()
-            lrs.append(scheduler.get_last_lr()[0])
+            # scheduler.step()
+            # lrs.append(scheduler.get_last_lr()[0])
 
         result = evaluate(model, val_loader)
         result['train_loss'] = torch.stack(train_losses).mean().item()
