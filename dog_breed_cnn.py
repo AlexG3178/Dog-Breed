@@ -13,20 +13,23 @@ from tqdm import tqdm
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+model_path = 'D:/Projects/models/dog_breed_model.pth'
 dataset = ImageFolder('D:/Projects/Dog Breed/Data/dogimages')
 breeds = []
 print('CUDA Available =', torch.cuda.is_available())
 print(torch.cuda.get_device_name(0))
 
-n_epochs = 15
+
+n_epochs = 10
 max_leaning_rate = 0.01
 weight_decay = 1e-4
-momentum = 0.9
 gradient_clip = 0.1
 batch_size = 32
 num_workers = 0
+patience = 3
 # optimizer = torch.optim.Adam
 optimizer = torch.optim.SGD
+momentum = 0.9
 
 
 #region Dataset & Transforms
@@ -176,7 +179,7 @@ class DogBreedClassificationCNN(ImageClassificationBase):
             # Fully Connected Layer 2 (Output Layer)
             nn.Dropout(0.5),
             nn.Linear(512, len(breeds)),
-            nn.Softmax(dim=1)
+            nn.LogSoftmax(dim=1)
         )
 
     def forward(self, xb):
@@ -187,16 +190,25 @@ class DogBreedClassificationEfficientNet(ImageClassificationBase):
     def __init__(self):
         super().__init__()
         self.network = models.efficientnet_b0(weights='DEFAULT')
+        
+         # Freeze all layers except the classifier - works faster but less accurate
+#         for param in self.network.parameters():
+#             param.requires_grad = False
+        
         num_ftrs = self.network.classifier[1].in_features
         self.network.classifier = nn.Sequential(
             nn.Dropout(0.5),
             nn.Linear(num_ftrs, len(breeds)),
-            nn.Softmax(dim=1)
+            nn.LogSoftmax(dim=1)
         )
+        
+        # Only the parameters of the new classifier will require gradients
+        # for param in self.network.classifier.parameters():
+        #     param.requires_grad = True
     def forward(self, xb):
         return self.network(xb)
     
-
+#
 class DogBreedClassificationResNet(ImageClassificationBase):
     def __init__(self):
         super().__init__()
@@ -205,7 +217,7 @@ class DogBreedClassificationResNet(ImageClassificationBase):
         self.network.fc = nn.Sequential(
             nn.Dropout(0.5),
             nn.Linear(num_ftrs, len(breeds)),
-            nn.Softmax(dim=1)
+            nn.LogSoftmax(dim=1)
         )
     def forward(self, xb):
         return self.network(xb)
@@ -219,7 +231,7 @@ class DogBreedClassificationVGG(ImageClassificationBase):
         self.network.classifier[6] = nn.Sequential(
             nn.Dropout(0.5),
             nn.Linear(num_ftrs, len(breeds)),
-            nn.Softmax(dim=1)
+            nn.LogSoftmax(dim=1)
         )
     def forward(self, xb):
         return self.network(xb)
@@ -282,13 +294,15 @@ def evaluate(model, val_loader):
     outputs = [model.validation_step(batch) for batch in val_loader]
     return model.validation_epoch_end(outputs)
 
-def fit(epochs, model, train_loader, val_loader, max_lr=0.01, weight_dec = 1e-4, moment=0.0, grad_clip=None, opt=optimizer):
-    
+def fit(epochs, model, train_loader, val_loader, max_lr=0.01, weight_dec=1e-4, moment=0.0, grad_clip=None, opt=optimizer, patien=patience):
     torch.cuda.empty_cache()
     history = []
     optim = opt(model.parameters(), max_lr, weight_decay=weight_dec, momentum=moment)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optim, max_lr, epochs=epochs, steps_per_epoch=len(train_loader))
-    
+
+    best_val_loss = float('inf')
+    epochs_without_improvement = 0
+
     for epoch in range(epochs):
         model.train()
         train_losses = []
@@ -297,22 +311,34 @@ def fit(epochs, model, train_loader, val_loader, max_lr=0.01, weight_dec = 1e-4,
             loss = model.training_step(batch)
             train_losses.append(loss)
             loss.backward()
-            
+
             if grad_clip:
                 nn.utils.clip_grad_value_(model.parameters(), grad_clip)
-            
+
             optim.step()
             optim.zero_grad()
             scheduler.step()
             lrs.append(scheduler.get_last_lr()[0])
-        
+
         result = evaluate(model, val_loader)
         result['train_loss'] = torch.stack(train_losses).mean().item()
         result['lrs'] = lrs
-        
+
         model.epoch_end(epoch, result)
         history.append(result)
-        
+
+        # Early Stopping Check
+        val_loss = result['val_loss']
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            epochs_without_improvement = 0  # Reset the counter if validation loss improves
+        else:
+            epochs_without_improvement += 1  # Increment the counter if validation loss does not improve
+
+        if epochs_without_improvement >= patien:
+            print(f"Early stopping triggered after {epoch+1} epochs.")
+            break  # Exit the training loop
+
     return history
 
 #endregion
@@ -333,20 +359,22 @@ if __name__ == "__main__":
     to_device(model, device)
     
     # Training
-    history = fit(n_epochs, model, train_dl, val_dl, max_leaning_rate, weight_dec=weight_decay, moment=momentum, grad_clip=gradient_clip)
+    history = fit(n_epochs, model, train_dl, val_dl, max_leaning_rate, weight_dec=weight_decay, moment=momentum, grad_clip=gradient_clip, opt=optimizer, patien=patience)
+    
+     # Evaluate on test data
+    test_dl = DeviceDataLoader(test_dl, device)
+    result = evaluate(model, test_dl)
+    print(f"Test Loss: {result['val_loss']:.4f}, Test Accuracy: {result['val_acc']:.4f}")
+    
+    # Save the model
+    torch.save(model, model_path)
     
     # Plotting the training history
     epochs = range(len(history))
     train_losses = [x['train_loss'] for x in history]
     val_losses = [x['val_loss'] for x in history]
     val_accs = [x['val_acc'] for x in history]
-    
-    # Evaluate on test data
-    test_dl = DeviceDataLoader(test_dl, device)
-    result = evaluate(model, test_dl)
-    print(f"Test Loss: {result['val_loss']:.4f}, Test Accuracy: {result['val_acc']:.4f}")
-    
-    
+
     plt.figure(figsize=(10, 4))
 
     plt.subplot(1, 2, 1)
