@@ -18,12 +18,14 @@ breeds = []
 print('CUDA Available =', torch.cuda.is_available())
 print(torch.cuda.get_device_name(0))
 
-
-n_epochs = 10
+n_epochs = 15
+max_leaning_rate = 0.01
+weight_decay = 1e-4
+momentum = 0.9
+gradient_clip = 0.1
 batch_size = 32
 num_workers = 0
 # optimizer = torch.optim.Adam
-# optimizer = torch.optim.SGD(lr=0.01, momentum=0.9)
 optimizer = torch.optim.SGD
 
 
@@ -174,7 +176,7 @@ class DogBreedClassificationCNN(ImageClassificationBase):
             # Fully Connected Layer 2 (Output Layer)
             nn.Dropout(0.5),
             nn.Linear(512, len(breeds)),
-            nn.LogSoftmax(dim=1)
+            nn.Softmax(dim=1)
         )
 
     def forward(self, xb):
@@ -189,7 +191,7 @@ class DogBreedClassificationEfficientNet(ImageClassificationBase):
         self.network.classifier = nn.Sequential(
             nn.Dropout(0.5),
             nn.Linear(num_ftrs, len(breeds)),
-            nn.LogSoftmax(dim=1)
+            nn.Softmax(dim=1)
         )
     def forward(self, xb):
         return self.network(xb)
@@ -203,7 +205,7 @@ class DogBreedClassificationResNet(ImageClassificationBase):
         self.network.fc = nn.Sequential(
             nn.Dropout(0.5),
             nn.Linear(num_ftrs, len(breeds)),
-            nn.LogSoftmax(dim=1)
+            nn.Softmax(dim=1)
         )
     def forward(self, xb):
         return self.network(xb)
@@ -217,7 +219,7 @@ class DogBreedClassificationVGG(ImageClassificationBase):
         self.network.classifier[6] = nn.Sequential(
             nn.Dropout(0.5),
             nn.Linear(num_ftrs, len(breeds)),
-            nn.LogSoftmax(dim=1)
+            nn.Softmax(dim=1)
         )
     def forward(self, xb):
         return self.network(xb)
@@ -280,12 +282,12 @@ def evaluate(model, val_loader):
     outputs = [model.validation_step(batch) for batch in val_loader]
     return model.validation_epoch_end(outputs)
 
-def fit(epochs, max_lr, model, train_loader, val_loader, weight_decay=0, grad_clip=None, optimizer=optimizer):
+def fit(epochs, model, train_loader, val_loader, max_lr=0.01, weight_dec = 1e-4, moment=0.0, grad_clip=None, opt=optimizer):
     
     torch.cuda.empty_cache()
     history = []
-    optimizer = optimizer(model.parameters(), max_lr, weight_decay=weight_decay)
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr, epochs=epochs, steps_per_epoch=len(train_loader))
+    optim = opt(model.parameters(), max_lr, weight_decay=weight_dec, momentum=moment)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optim, max_lr, epochs=epochs, steps_per_epoch=len(train_loader))
     
     for epoch in range(epochs):
         model.train()
@@ -299,14 +301,15 @@ def fit(epochs, max_lr, model, train_loader, val_loader, weight_decay=0, grad_cl
             if grad_clip:
                 nn.utils.clip_grad_value_(model.parameters(), grad_clip)
             
-            optimizer.step()
-            optimizer.zero_grad()
+            optim.step()
+            optim.zero_grad()
             scheduler.step()
             lrs.append(scheduler.get_last_lr()[0])
         
         result = evaluate(model, val_loader)
         result['train_loss'] = torch.stack(train_losses).mean().item()
         result['lrs'] = lrs
+        
         model.epoch_end(epoch, result)
         history.append(result)
         
@@ -330,7 +333,7 @@ if __name__ == "__main__":
     to_device(model, device)
     
     # Training
-    history = fit(n_epochs, 0.01, model, train_dl, val_dl, weight_decay=1e-4, grad_clip=0.1)
+    history = fit(n_epochs, model, train_dl, val_dl, max_leaning_rate, weight_dec=weight_decay, moment=momentum, grad_clip=gradient_clip)
     
     # Plotting the training history
     epochs = range(len(history))
@@ -338,8 +341,14 @@ if __name__ == "__main__":
     val_losses = [x['val_loss'] for x in history]
     val_accs = [x['val_acc'] for x in history]
     
-    plt.figure(figsize=(10, 4))
+    # Evaluate on test data
+    test_dl = DeviceDataLoader(test_dl, device)
+    result = evaluate(model, test_dl)
+    print(f"Test Loss: {result['val_loss']:.4f}, Test Accuracy: {result['val_acc']:.4f}")
     
+    
+    plt.figure(figsize=(10, 4))
+
     plt.subplot(1, 2, 1)
     plt.plot(epochs, train_losses, '-o', label='Train loss')
     plt.plot(epochs, val_losses, '-o', label='Validation loss')
@@ -355,21 +364,18 @@ if __name__ == "__main__":
     
     plt.show()
 
-    # Evaluate on test data
-    test_dl = DeviceDataLoader(test_dl, device)
-    result = evaluate(model, test_dl)
-    print(f"Test Loss: {result['val_loss']:.4f}, Test Accuracy: {result['val_acc']:.4f}")
+    
     
     # Prediction
-    def predict_single(img, label):
-        xb = to_device(img.unsqueeze(0), device)
-        preds = model(xb)
-        _, pred = torch.max(preds, dim=1)
-        print(f'Actual: {breeds[label]}, Predicted: {breeds[pred.item()]}')
-        plt.imshow(img.permute(1, 2, 0))
-        plt.show()
+    # def predict_single(img, label):
+    #     xb = to_device(img.unsqueeze(0), device)
+    #     preds = model(xb)
+    #     _, pred = torch.max(preds, dim=1)
+    #     print(f'Actual: {breeds[label]}, Predicted: {breeds[pred.item()]}')
+    #     plt.imshow(img.permute(1, 2, 0))
+    #     plt.show()
 
-    # Test a prediction
-    predict_single(*test_dataset[8])
+    # # Test a prediction
+    # predict_single(*test_dataset[8])
     
     #endregion
