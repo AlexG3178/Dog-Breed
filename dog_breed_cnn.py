@@ -24,10 +24,11 @@ n_epochs = 50
 max_leaning_rate = 0.001
 weight_decay = 1e-3
 gradient_clip = 0.1
-batch_size = 32   # 64 !!!!!!!!!!!
+batch_size = 32   
 num_workers = 0
-patience = 3
-optimizer = torch.optim.SGD
+patience = 5
+optimizer = torch.optim.Adam
+# optimizer = torch.optim.SGD
 momentum = 0.9
 
 
@@ -137,46 +138,37 @@ class ImageClassificationBase(nn.Module):
         print(f"Epoch [{epoch+1}], train_loss: {result['train_loss']:.4f}, val_loss: {result['val_loss']:.4f}, val_acc: {result['val_acc']:.4f}")
         
 
-
 class DogBreedClassificationCNN(ImageClassificationBase):
     def __init__(self):
         super().__init__()
         self.network = nn.Sequential(
-            
             # Convolutional Layer 1
             nn.Conv2d(3, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.MaxPool2d(2, 2),  # Reduces 224x224 -> 112x112
+            nn.MaxPool2d(2, 2),  # Reduces size by half
             
             # Convolutional Layer 2
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.MaxPool2d(2, 2),  # Reduces 112x112 -> 56x56
-
+            nn.MaxPool2d(2, 2),  # Reduces size by half
+            
             # Convolutional Layer 3
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(),
-            nn.MaxPool2d(2, 2),  # Reduces 56x56 -> 28x28
-
-            # Convolutional Layer 4
-            nn.Conv2d(128, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),  # Reduces 28x28 -> 14x14
-
+            nn.MaxPool2d(2, 2),  # Reduces size by half
+            
             # Flatten Layer
             nn.Flatten(),
-
+            
             # Fully Connected Layer 1
-            nn.Dropout(0.5),
-            nn.Linear(256*14*14, 512),
+            nn.Dropout(0.4),
+            nn.Linear(128*28*28, 512),
             nn.ReLU(),
-
+            
             # Fully Connected Layer 2 (Output Layer)
-            nn.Dropout(0.5),
             nn.Linear(512, len(breeds)),
             nn.LogSoftmax(dim=1)
         )
@@ -237,17 +229,11 @@ class DogBreedClassificationVGG(ImageClassificationBase):
     
 #endregion
 
-# model = DogBreedClassificationCNN()
-# Epoch [10], train_loss: 4.8556, val_loss: 4.8793, val_acc: 0.0087
-
-model = DogBreedClassificationEfficientNet()
-# Epoch [10], train_loss: 0.5459, val_loss: 0.8211, val_acc: 0.7502
-
+model = DogBreedClassificationCNN()
+# model = DogBreedClassificationEfficientNet()
 # model = DogBreedClassificationResNet()
-# Epoch [10], train_loss: 1.0750, val_loss: 1.0798, val_acc: 0.6796
-
 # model = DogBreedClassificationVGG()
-# Epoch [10], train_loss: 4.8558, val_loss: 4.8786, val_acc: 0.0104
+
 
 
 #region Device Configuration
@@ -296,10 +282,25 @@ def evaluate(model, val_loader):
 def fit(epochs, model, train_loader, val_loader, max_lr=0.01, weight_dec=1e-4, moment=0.0, grad_clip=None, opt=optimizer, patien=patience):
     torch.cuda.empty_cache()
     history = []
-    optim = opt(model.parameters(), max_lr, weight_decay=weight_dec, momentum=moment)
-    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optim, max_lr, epochs=epochs, steps_per_epoch=len(train_loader))
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, mode='min', patience=patien, verbose=True)
-
+    
+    # Adam
+    optim = opt(model.parameters(), max_lr, weight_decay=weight_dec)
+    # SGD
+    # optim = opt(model.parameters(), max_lr, weight_decay=weight_dec, momentum=moment)
+    
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optim, max_lr, epochs=epochs, steps_per_epoch=len(train_loader))
+    '''Best for: Training CNNs from scratch on large datasets.
+    It adjusts the learning rate according to the One Cycle Policy, which increases 
+    the learning rate to a maximum value and then decreases it towards the end of training. 
+    This can often lead to faster convergence and better generalization.
+    '''
+    
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, mode='min', patience=patien)
+    ''' Best for: Fine-tuning pre-trained models or when training CNNs where you want 
+    to reduce the learning rate based on the performance (e.g., validation loss).
+    It monitors a metric (usually validation loss) and reduces the learning rate when the metric stops improving, 
+    which can help in escaping local minima and achieving better convergence.
+    '''
     best_val_loss = float('inf')
     epochs_without_improvement = 0
 
@@ -317,8 +318,9 @@ def fit(epochs, model, train_loader, val_loader, max_lr=0.01, weight_dec=1e-4, m
 
             optim.step()
             optim.zero_grad()
-            # scheduler.step()
-            # lrs.append(scheduler.get_last_lr()[0])
+            scheduler.step()
+            # scheduler.step(metrics=loss.item()) # for ReduceLROnPlateau
+            lrs.append(scheduler.get_last_lr()[0])
 
         result = evaluate(model, val_loader)
         result['train_loss'] = torch.stack(train_losses).mean().item()
