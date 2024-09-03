@@ -13,37 +13,55 @@ from tqdm import tqdm
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-model_path = 'D:/Projects/models/dog_breed_model.pth'
-dataset = ImageFolder('D:/Projects/Dog Breed/Data/dogimages')
-breeds = []
-print('CUDA Available =', torch.cuda.is_available())
-print(torch.cuda.get_device_name(0))
 
 
-n_epochs = 50
-max_leaning_rate = 0.001
-weight_decay = 1e-3
-gradient_clip = 0.1
-batch_size = 32   
-num_workers = 0
-patience = 5
-optimizer = torch.optim.Adam
-# optimizer = torch.optim.SGD
-momentum = 0.9
+#region Load data & Transforms
+
+def load_data(data_path, batch_size, num_workers):
+    dataset = ImageFolder(data_path)
+    breeds = [rename(name) for name in dataset.classes]
+
+    train_ds, test_dev_ds = train_test_split(dataset, test_size=0.4, train_size=0.6, random_state=34)
+    val_ds, test_ds = train_test_split(test_dev_ds, test_size=0.5, train_size=0.5, random_state=34)
+    print(f"train_ds: {len(train_ds)}, val_ds: {len(val_ds)}, test_ds: {len(test_ds)}") 
+    imagenet_stats = ([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    
+    train_transform = transforms.Compose([
+        transforms.Resize((256, 256)),  # Resize the image
+        transforms.RandomCrop(224, padding=4, padding_mode='reflect'),  # Random crop
+        transforms.RandomHorizontalFlip(p=0.3),  # Random horizontal flip
+        transforms.RandomRotation(degrees=30),  # Random rotation
+        transforms.ToTensor(),  # Convert image to PyTorch tensor
+        transforms.Normalize(mean=imagenet_stats[0], std=imagenet_stats[1])  # Normalize
+    ])
+
+    val_transform = transforms.Compose([
+        transforms.Resize((224, 224)),  # Resize the image
+        transforms.ToTensor(),  # Convert image to PyTorch tensor
+        transforms.Normalize(mean=imagenet_stats[0], std=imagenet_stats[1])  # Normalize
+    ])
+
+    test_transform = transforms.Compose([
+        transforms.Resize((224, 224)),  # Resize the image
+        transforms.ToTensor(),  # Convert image to PyTorch tensor
+        transforms.Normalize(mean=imagenet_stats[0], std=imagenet_stats[1])  # Normalize
+    ])
+
+    train_dataset = DogsDataset(train_ds, train_transform)
+    val_dataset = DogsDataset(val_ds, val_transform)
+    test_dataset = DogsDataset(test_ds, test_transform)
+
+    train_dl = DataLoader(train_dataset, batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
+    val_dl = DataLoader(val_dataset, batch_size * 2, num_workers=num_workers, pin_memory=True)
+    test_dl = DataLoader(test_dataset, batch_size * 2, num_workers=num_workers, pin_memory=True)
+
+    return train_dl, val_dl, test_dl, breeds
 
 
-#region Dataset & Transforms
 def rename(name):
     new_name = name.split('.')[1]
     new_name = new_name.replace('_',' ')
     return new_name
-
-for name in dataset.classes:
-    breeds.append(rename(name))
-
-train_ds, test_dev_ds = train_test_split(dataset, test_size=0.4, train_size=0.6, random_state=34)
-val_ds, test_ds = train_test_split(test_dev_ds, test_size=0.5, train_size=0.5, random_state=34)
-print(len(train_ds), len(val_ds), len(test_ds))
 
 
 class DogsDataset(Dataset):
@@ -69,50 +87,12 @@ class DogsDataset(Dataset):
                 raise
 
         return img, label
-        
-        
-imagenet_stats = ([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-
-train_transform = transforms.Compose([
-    transforms.Resize((256, 256)),  # Resize the image
-    transforms.RandomCrop(224, padding=4, padding_mode='reflect'),  # Random crop
-    transforms.RandomHorizontalFlip(p=0.3),  # Random horizontal flip
-    transforms.RandomRotation(degrees=30),  # Random rotation
-    transforms.ToTensor(),  # Convert image to PyTorch tensor
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize
-])
-
-val_transform = transforms.Compose([
-    transforms.Resize((224, 224)),  # Resize the image
-    transforms.ToTensor(),  # Convert image to PyTorch tensor
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize
-])
-
-test_transform = transforms.Compose([
-    transforms.Resize((224, 224)),  # Resize the image
-    transforms.ToTensor(),  # Convert image to PyTorch tensor
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize
-])
-
-train_dataset = DogsDataset(train_ds, train_transform)
-val_dataset = DogsDataset(val_ds, val_transform)
-test_dataset = DogsDataset(test_ds, test_transform)
-        
-
-train_dl = DataLoader(train_dataset, batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
-val_dl = DataLoader(val_dataset, batch_size*2, num_workers=num_workers, pin_memory=True)
-test_dl = DataLoader(test_dataset, batch_size*2, num_workers=num_workers, pin_memory=True)
 
 #endregion
 
 
 
 #region: Model
-
-def accuracy(outputs, labels):
-    _, preds = torch.max(outputs, dim=1)
-    return torch.tensor(torch.sum(preds == labels).item() / len(preds))
-
 class ImageClassificationBase(nn.Module):
     def training_step(self, batch):
         images, labels = batch
@@ -136,10 +116,15 @@ class ImageClassificationBase(nn.Module):
 
     def epoch_end(self, epoch, result):
         print(f"Epoch [{epoch+1}], train_loss: {result['train_loss']:.4f}, val_loss: {result['val_loss']:.4f}, val_acc: {result['val_acc']:.4f}")
-        
+
+
+def accuracy(outputs, labels):
+    _, preds = torch.max(outputs, dim=1)
+    return torch.tensor(torch.sum(preds == labels).item() / len(preds))        
+
 
 class DogBreedClassificationCNN(ImageClassificationBase):
-    def __init__(self):
+    def __init__(self, num_classes):
         super().__init__()
         self.network = nn.Sequential(
             # Convolutional Layer 1
@@ -169,16 +154,17 @@ class DogBreedClassificationCNN(ImageClassificationBase):
             nn.ReLU(),
             
             # Fully Connected Layer 2 (Output Layer)
-            nn.Linear(512, len(breeds)),
+            nn.Linear(512, num_classes),
             nn.LogSoftmax(dim=1)
         )
 
     def forward(self, xb):
         return self.network(xb)
+    
 
 
 class DogBreedClassificationEfficientNet(ImageClassificationBase):
-    def __init__(self):
+    def __init__(self, num_classes):
         super().__init__()
         self.network = models.efficientnet_b1 (weights='DEFAULT')
         
@@ -189,7 +175,7 @@ class DogBreedClassificationEfficientNet(ImageClassificationBase):
         num_ftrs = self.network.classifier[1].in_features
         self.network.classifier = nn.Sequential(
             nn.Dropout(0.5),
-            nn.Linear(num_ftrs, len(breeds)),
+            nn.Linear(num_ftrs, num_classes),
             nn.LogSoftmax(dim=1)
         )
         
@@ -201,13 +187,13 @@ class DogBreedClassificationEfficientNet(ImageClassificationBase):
     
 #
 class DogBreedClassificationResNet(ImageClassificationBase):
-    def __init__(self):
+    def __init__(self, num_classes):
         super().__init__()
         self.network = models.resnet50(weights='DEFAULT')
         num_ftrs = self.network.fc.in_features
         self.network.fc = nn.Sequential(
             nn.Dropout(0.5),
-            nn.Linear(num_ftrs, len(breeds)),
+            nn.Linear(num_ftrs, num_classes),
             nn.LogSoftmax(dim=1)
         )
     def forward(self, xb):
@@ -215,13 +201,13 @@ class DogBreedClassificationResNet(ImageClassificationBase):
 
 
 class DogBreedClassificationVGG(ImageClassificationBase):
-    def __init__(self):
+    def __init__(self, num_classes):
         super().__init__()
         self.network = models.vgg16(weights='DEFAULT')
         num_ftrs = self.network.classifier[6].in_features
         self.network.classifier[6] = nn.Sequential(
             nn.Dropout(0.5),
-            nn.Linear(num_ftrs, len(breeds)),
+            nn.Linear(num_ftrs, num_classes),
             nn.LogSoftmax(dim=1)
         )
     def forward(self, xb):
@@ -229,15 +215,10 @@ class DogBreedClassificationVGG(ImageClassificationBase):
     
 #endregion
 
-model = DogBreedClassificationCNN()
-# model = DogBreedClassificationEfficientNet()
-# model = DogBreedClassificationResNet()
-# model = DogBreedClassificationVGG()
-
 
 
 #region Device Configuration
-    
+
 def get_default_device():
     if torch.cuda.is_available():
         return torch.device('cuda')
@@ -279,16 +260,16 @@ def evaluate(model, val_loader):
     outputs = [model.validation_step(batch) for batch in val_loader]
     return model.validation_epoch_end(outputs)
 
-def fit(epochs, model, train_loader, val_loader, max_lr=0.01, weight_dec=1e-4, moment=0.0, grad_clip=None, opt=optimizer, patien=patience):
+def fit(epochs, model, train_loader, val_loader, max_lr, weight_dec, momentum, grad_clip, optimizer, patience):
     torch.cuda.empty_cache()
     history = []
     
     # Adam
-    optim = opt(model.parameters(), max_lr, weight_decay=weight_dec)
+    optimizer = optimizer(model.parameters(), max_lr, weight_decay=weight_dec)
     # SGD
-    # optim = opt(model.parameters(), max_lr, weight_decay=weight_dec, momentum=moment)
+    # optimizer = optimizer(model.parameters(), max_lr, weight_decay=weight_dec, momentum=momentum)
     
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(optim, max_lr, epochs=epochs, steps_per_epoch=len(train_loader))
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr, epochs=epochs, steps_per_epoch=len(train_loader))
     '''Best for: Training CNNs from scratch on large datasets.
     It adjusts the learning rate according to the One Cycle Policy, which increases 
     the learning rate to a maximum value and then decreases it towards the end of training. 
@@ -316,8 +297,8 @@ def fit(epochs, model, train_loader, val_loader, max_lr=0.01, weight_dec=1e-4, m
             if grad_clip:
                 nn.utils.clip_grad_value_(model.parameters(), grad_clip)
 
-            optim.step()
-            optim.zero_grad()
+            optimizer.step()
+            optimizer.zero_grad()
             scheduler.step()
             # scheduler.step(metrics=loss.item()) # for ReduceLROnPlateau
             lrs.append(scheduler.get_last_lr()[0])
@@ -337,7 +318,7 @@ def fit(epochs, model, train_loader, val_loader, max_lr=0.01, weight_dec=1e-4, m
         else:
             epochs_without_improvement += 1  # Increment the counter if validation loss does not improve
 
-        if epochs_without_improvement >= patien:
+        if epochs_without_improvement >= patience:
             print(f"Early stopping triggered after {epoch+1} epochs.")
             break  # Exit the training loop
 
@@ -349,8 +330,35 @@ def fit(epochs, model, train_loader, val_loader, max_lr=0.01, weight_dec=1e-4, m
 
 #region  Main function
 
-if __name__ == "__main__":
+def main():
     
+    # Configuration
+    data_path = 'D:/Projects/Dog Breed/Data/dogimages'
+    model_path = 'D:/Projects/models/dog_breed_model.pth'
+    batch_size = 32
+    num_workers = 0
+    n_epochs = 10
+    max_learning_rate = 0.001
+    weight_decay = 1e-3
+    gradient_clip = 0.1
+    patience = 5
+    optimizer = torch.optim.Adam
+    # optimizer = torch.optim.SGD
+    momentum = 0.9
+    
+    print('CUDA Available =', torch.cuda.is_available())
+    print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')
+    
+     # Load data
+    train_dl, val_dl, test_dl, breeds = load_data(data_path, batch_size, num_workers)
+
+    # Initialize model
+    num_classes = len(breeds)
+    # model = DogBreedClassificationCNN(num_classes)
+    model = DogBreedClassificationEfficientNet(num_classes)
+    # model = DogBreedClassificationResNet(num_classes)
+    # model = DogBreedClassificationVGG(num_classes)
+
     # Device configuration
     device = get_default_device()
     print(f'default device: {device}')
@@ -358,17 +366,18 @@ if __name__ == "__main__":
     # Moving data and model to GPU
     train_dl = DeviceDataLoader(train_dl, device)
     val_dl = DeviceDataLoader(val_dl, device)
+    test_dl = DeviceDataLoader(test_dl, device)
     to_device(model, device)
     
     # Training
-    history = fit(n_epochs, model, train_dl, val_dl, max_leaning_rate, weight_dec=weight_decay, moment=momentum, grad_clip=gradient_clip, opt=optimizer, patien=patience)
+    history = fit(n_epochs, model, train_dl, val_dl, max_learning_rate, weight_decay, momentum, gradient_clip, optimizer, patience)
     
      # Evaluate on test data
     test_dl = DeviceDataLoader(test_dl, device)
     result = evaluate(model, test_dl)
     print(f"Test Loss: {result['val_loss']:.4f}, Test Accuracy: {result['val_acc']:.4f}")
     
-    # Save the model
+    # Save the model=
     torch.save(model, model_path)
     
     # Plotting the training history
@@ -395,7 +404,6 @@ if __name__ == "__main__":
     plt.show()
 
     
-    
     # Prediction
     # def predict_single(img, label):
     #     xb = to_device(img.unsqueeze(0), device)
@@ -409,3 +417,5 @@ if __name__ == "__main__":
     # predict_single(*test_dataset[8])
     
     #endregion
+    
+main()
