@@ -416,6 +416,9 @@ def main():
     # # Test a prediction
     # predict_single(*test_dataset[8])
     
-    #endregion
     
-main()
+if __name__ == '__main__': 
+    main()
+    
+    #endregion
+   
