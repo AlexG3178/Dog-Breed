@@ -1,2 +1,4 @@
 .venv/
-/Data/
+.vscode
+__pycache__
+datasets
