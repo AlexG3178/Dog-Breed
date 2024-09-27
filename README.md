@@ -1,4 +1,4 @@
-Overview
+Overview  
 This repository provides an end-to-end pipeline for training and evaluating dog breed classification models using deep learning. 
 The project includes:
 
@@ -10,18 +10,18 @@ The project includes:
 6. Device Management: Automatic GPU/CPU selection and efficient data loading with PyTorch DataLoader.
 
 Features
-1. Custom and Pre-Trained Models: Train a custom CNN or use pre-trained models like EfficientNet, ResNet, and VGG.
-2. Data Augmentation: Random cropping, flipping, rotation, and normalization to improve model robustness.
-3. Early Stopping: Prevent overfitting by stopping training if validation loss stops improving.
-4. Learning Rate Scheduling: Adaptive learning rates for better convergence using OneCycleLR or ReduceLROnPlateau.
-5. Automatic Device Selection: The code automatically selects GPU if available, otherwise, it defaults to CPU.
-6. Inference: Predict dog breeds from a single image with model inference tools.
+- Custom and Pre-Trained Models: Train a custom CNN or use pre-trained models like EfficientNet, ResNet, and VGG.
+- Data Augmentation: Random cropping, flipping, rotation, and normalization to improve model robustness.
+- Early Stopping: Prevent overfitting by stopping training if validation loss stops improving.
+- Learning Rate Scheduling: Adaptive learning rates for better convergence using OneCycleLR or ReduceLROnPlateau.
+- Automatic Device Selection: The code automatically selects GPU if available, otherwise, it defaults to CPU.
+- Inference: Predict dog breeds from a single image with model inference tools.
 
-Requirements
+Requirements  
 To run the project, the following libraries are required:
-1. PyTorch
-2. Torchvision
-3. scikit-learn
-4. Matplotlib
-5. tqdm
-6. PIL (Pillow)
+- PyTorch
+- Torchvision
+- scikit-learn
+- Matplotlib
+- tqdm
+- PIL (Pillow)
